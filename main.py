@@ -1,10 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import chromadb
-from fastembed import TextEmbedding
 from openai import OpenAI
-import os
+import os, json, re
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -17,18 +15,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Initialize ---
-CHROMA_PATH = "./chroma_db"
-chroma = chromadb.PersistentClient(path=CHROMA_PATH)
-col = chroma.get_or_create_collection("vault", metadata={"hnsw:space": "cosine"})
+# Load pre-computed chunks (no model needed)
+with open("chunks.json", "r") as f:
+    CHUNKS = json.load(f)
 
+# Groq client
 groq_client = OpenAI(
     api_key=os.getenv("GROQ_API_KEY"),
     base_url="https://api.groq.com/openai/v1",
-)  
+)
 
 
-# --- Request/Response models ---
+def simple_retrieve(question: str, top_k: int = 5) -> list[dict]:
+    """Keyword-based retrieval. Works for small vaults (< 100 chunks)."""
+    question_words = set(re.findall(r'\w+', question.lower()))
+    scored = []
+    for chunk in CHUNKS:
+        chunk_words = set(re.findall(r'\w+', chunk["text"].lower()))
+        overlap = len(question_words & chunk_words)
+        scored.append((overlap, chunk))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [c for _, c in scored[:top_k]]
+
+
 class QueryRequest(BaseModel):
     question: str
     top_k: int = 5
@@ -39,33 +48,26 @@ class QueryResponse(BaseModel):
     sources: list[str]
 
 
-# --- Endpoints ---
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "chunks_indexed": col.count()}
+    return {"status": "ok", "chunks_indexed": len(CHUNKS)}
 
 
 @app.post("/api/query", response_model=QueryResponse)
-def query(req: QueryRequest): 
+def query(req: QueryRequest):
     question = req.question
     top_k = req.top_k
 
-    q_vec = list(embedder.embed([question]))[0].tolist()
+    # 1. Retrieve (keyword matching, no model)
+    results = simple_retrieve(question, top_k)
 
-    results = col.query(
-        query_embeddings=[q_vec],
-        n_results=top_k,
-    )
-
-    chunks = results["documents"][0]
-    metadatas = results["metadatas"][0]
-
+    # 2. Build context
     context_parts = []
-    for i, (chunk, meta) in enumerate(zip(chunks, metadatas)):
-        context_parts.append(f"[Source {i+1}: {meta['source']}]\n{chunk}")
-
+    for i, chunk in enumerate(results):
+        context_parts.append(f"[Source {i+1}: {chunk['source']}]\n{chunk['text']}")
     context = "\n\n---\n\n".join(context_parts)
 
+    # 3. Generate answer via Groq
     prompt = f"""You are a knowledge assistant. Answer the user's question using ONLY the provided context from their notes.
 
 Rules:
@@ -87,13 +89,11 @@ Question: {question}"""
     )
 
     answer = response.choices[0].message.content
-    sources = list(set(m["source"] for m in metadatas))
+    sources = list(set(c["source"] for c in results))
 
     return QueryResponse(answer=answer, sources=sources)
 
 
 @app.post("/api/reindex")
 def reindex():
-    from ingest import build_index
-    build_index()
-    return {"status": "ok"}   
+    return {"status": "ok", "detail": "Reindex locally: run python ingest.py then push chunks.json"}   
