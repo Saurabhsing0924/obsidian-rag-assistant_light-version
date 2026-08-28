@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import chromadb
-from sentence_transformers import SentenceTransformer
+from fastembed import TextEmbedding
 from openai import OpenAI
 import os
 from dotenv import load_dotenv
@@ -19,7 +19,7 @@ app.add_middleware(
 
 # --- Initialize ---
 CHROMA_PATH = "./chroma_db"
-embedder = SentenceTransformer("all-MiniLM-L6-v2")
+embedder = TextEmbedding("sentence-transformers/all-MiniLM-L6-v2")
 chroma = chromadb.PersistentClient(path=CHROMA_PATH)
 col = chroma.get_or_create_collection("vault", metadata={"hnsw:space": "cosine"})
 
@@ -72,7 +72,7 @@ def query(req: QueryRequest):
     question = req.question
     top_k = req.top_k
 
-    q_vec = embedder.encode([question])[0].tolist()
+    q_vec = list(embedder.embed([question]))[0].tolist()
 
     results = col.query(
         query_embeddings=[q_vec],
