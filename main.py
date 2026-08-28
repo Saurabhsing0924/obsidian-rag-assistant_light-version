@@ -19,32 +19,13 @@ app.add_middleware(
 
 # --- Initialize ---
 CHROMA_PATH = "./chroma_db"
-embedder = TextEmbedding("sentence-transformers/all-MiniLM-L6-v2")
 chroma = chromadb.PersistentClient(path=CHROMA_PATH)
 col = chroma.get_or_create_collection("vault", metadata={"hnsw:space": "cosine"})
 
 groq_client = OpenAI(
     api_key=os.getenv("GROQ_API_KEY"),
     base_url="https://api.groq.com/openai/v1",
-)
-
-import threading
-
-_indexed = False
-
-def _do_index():
-    global _indexed
-    from ingest import build_index
-    print("🔄 Re-indexing vault in background...")
-    build_index()
-    _indexed = True
-    print(f"✅ Indexed {col.count()} chunks")
-
-@app.on_event("startup")
-def startup():
-    """Start indexing in background so server accepts requests immediately."""
-    t = threading.Thread(target=_do_index, daemon=True)
-    t.start()   
+)  
 
 
 # --- Request/Response models ---
@@ -65,10 +46,7 @@ def health():
 
 
 @app.post("/api/query", response_model=QueryResponse)
-def query(req: QueryRequest):
-    if not _indexed:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=503, detail="Still indexing vault. Try again in 30 seconds.")   
+def query(req: QueryRequest): 
     question = req.question
     top_k = req.top_k
 
