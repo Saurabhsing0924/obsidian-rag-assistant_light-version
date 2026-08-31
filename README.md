@@ -6,7 +6,7 @@ Built this for a GenAI internship build sprint. The idea is simple — point it 
 
 - Frontend: [https://vault-rag-assistant.lovable.app/]
 - Backend: https://obsidian-rag-assistant.onrender.com
-- Demo video: [your Loom link](https://your-loom-link.com)
+- Demo video: [(https://drive.google.com/file/d/1sKpcPIIUGR3ap6suHJGKGRIRl6BECRa3/view?usp=sharing))
 
 ## What it does
 
